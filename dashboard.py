@@ -1,9 +1,11 @@
+import os
+os.environ["SDL_VIDEODRIVER"] = "offscreen"
+
 import sys
 import time
 import requests
 import json
 import pygame
-import os
 import io
 from flask import Flask, request, jsonify, render_template
 from threading import Thread
@@ -13,28 +15,37 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # config
-LARGE_FONT = 62
-MEDIUM_FONT = 40
-SMALL_FONT = 30
+LARGE_FONT = 50
+MEDIUM_FONT = 28
+SMALL_FONT = 20
 
-quote_text = "Tech Talkies Dashboard"
+quote_text = "Information Center"
 
 # Initialize API_URL, LAT, LON, and tasks as global variables.  These will be loaded from config.json
 API_URL = ""
 LAT = 0
 LON = 0
 tasks = []
+TEMPUOM = "C"
 data_file_path = 'config.json'  # Path to your data file.  Make sure this is correct!
 last_modified_time = 0
 API_KEY = ""
 update_weather = True
 update_ToDo = True
 
-# Initialize pygame
+# Initialize pygame in offscreen mode and set up 16-bit framebuffer surface
 pygame.init()
-screen = pygame.display.set_mode((480, 320), pygame.FULLSCREEN)
+#screen = pygame.display.set_mode((480, 320), pygame.FULLSCREEN)
+screen = pygame.display.set_mode((480, 320))
 screen_width, screen_height = screen.get_size()
+fb_surface = pygame.Surface((screen_width, screen_height), depth=16)
 clock = pygame.time.Clock()
+
+def push_to_fb():
+    """Blits the offscreen pygame surface to 16-bit RGB565 and writes directly to /dev/fb0."""
+    fb_surface.blit(screen, (0, 0))
+    with open("/dev/fb0", "r+b", buffering=0) as fb:
+        fb.write(fb_surface.get_buffer())
 
 # Font sizes
 font_large = pygame.font.Font('Poppins-Regular.ttf', LARGE_FONT)
@@ -107,12 +118,12 @@ def fetch_weather():
         logging.error(f"Error fetching weather: {e}")
         return None
 
-def draw_tile(rect, color, lines, font, radius=12, align="center"):
+def draw_tile(rect, color, lines, font, top_padding=10, radius=12, align="center"):
     """Draws a tile with rounded corners and text."""
     pygame.draw.rect(screen, color, rect, border_radius=radius)
     rendered_lines = [font.render(str(text), True, (255, 255, 255)) for text in lines]
     total_height = sum(line.get_height() for line in rendered_lines)
-    start_y = rect[1] + (rect[3] - total_height) // 2
+    start_y = (rect[1] + (rect[3] - total_height) // 2) + top_padding
 
     for line in rendered_lines:
         if align == "center":
@@ -155,7 +166,7 @@ def draw_time_tile():
 
     time_height = font_large.get_height()
     day_date_surface = font_medium.render(day_date, True, (255, 255, 255))
-    day_date_rect = day_date_surface.get_rect(center=(time_tile_rect[0] + time_tile_rect[2] // 2, time_tile_rect[1] + time_height + font_medium.get_height() - SMALL_FONT))
+    day_date_rect = day_date_surface.get_rect(center=(time_tile_rect[0] + time_tile_rect[2] // 2, time_tile_rect[1] + time_height + font_medium.get_height() - 8 - SMALL_FONT))
     screen.blit(day_date_surface, day_date_rect)
 
     if seconds != seconds_new:
@@ -173,49 +184,52 @@ def draw_weather_tile():
         main = weather_data["main"]
         weather = weather_data["weather"][0]
         wind = weather_data["wind"]
-        temp_c = round(main["temp"] - 273.15, 1)
-        weather_lines = [
-            f"    {temp_c}°C", ""
-        ]
+        if TEMPUOM == "C" :
+            # Celsius temperature logic
+            temp_c = round(main["temp"] - 273.15, 1)
+            weather_lines = [
+                f"    {temp_c}°C", ""
+            ]
+        else:
+            temp_f = round(main["temp"] * 1.8 - 459.67, 1)
+            weather_lines = [
+                f"    {temp_f}°F", ""
+            ]
         small_lines = [
-             f"{weather['description']}",
+            f"{weather['description']}",
             f"Humidity: {main['humidity']}%"
         ]
         iconId = weather['icon']
         draw_tile(weather_tile_rect, (20, 138, 186), weather_lines, font_large)
-        
+
     else:
         weather_lines = ["No data", "Check API", "Connection?"]
         draw_tile(weather_tile_rect, (20, 138, 186), weather_lines, font_medium)
-    
+
     if weather_data:
         icon_URL = f"https://openweathermap.org/img/wn/{iconId}@2x.png"
-        
+
         response = requests.get(icon_URL)
         image_file = io.BytesIO(response.content)
-        
-        icon_radius = 100
+
+        icon_radius = 80
         icon_x = weather_tile_rect[0] + padding
-        icon_y = weather_tile_rect[1] + (weather_tile_rect[3] // 2)
-        
+        icon_y = weather_tile_rect[1] - padding
+
         icon_surface = pygame.image.load(image_file).convert_alpha()
         icon_surface = pygame.transform.scale(icon_surface, (icon_radius, icon_radius))
-        screen.blit(icon_surface, (icon_x - padding, icon_y-icon_radius))  # center it like the circle
+        screen.blit(icon_surface, (icon_x - padding, icon_y))  # center it like the circle
 
-        text_rect_width = weather_tile_rect[2] - 3 * (icon_radius + padding)
-        text_rect = pygame.Rect(icon_x + icon_radius + padding, weather_tile_rect[1] + padding, text_rect_width, weather_tile_rect[3] - 2 * padding)
-        
         tile_center_y = weather_tile_rect[1] + weather_tile_rect[3] // 2
-        temp_text_height = font_large.get_height()
         start_y = tile_center_y
 
         for idx, line in enumerate(small_lines):
             text_surface = font_small.render(line, True, (255, 255, 255))
             text_rect = text_surface.get_rect(
-                midtop=(weather_tile_rect[0] + weather_tile_rect[2] // 2, start_y + idx * (font_small.get_height() + 5))
+                midtop=(weather_tile_rect[0] + weather_tile_rect[2] // 2, start_y + idx * (font_small.get_height()))
             )
             screen.blit(text_surface, text_rect)
-    
+
     update_weather = False
 
 
@@ -223,24 +237,28 @@ def draw_todo_tile():
     """Draws the todo tile."""
     global tasks
     heading_surface = font_medium.render("TO-DO", True, (255, 255, 255))
-    heading_rect = heading_surface.get_rect(center=(todo_tile_rect[0] + todo_tile_rect[2] // 2, todo_tile_rect[1] + 20 + padding))
+    heading_rect = heading_surface.get_rect(center=(todo_tile_rect[0] + todo_tile_rect[2] // 2, todo_tile_rect[1] + padding * 2))
     pygame.draw.rect(screen, (19, 140, 139), todo_tile_rect, border_radius=12)
     screen.blit(heading_surface, heading_rect)
 
     if tasks:
         lines = []
         for task in tasks:
-            if task['isChecked']:
-                lines.append(f"☑ {task['taskText']}")
-            else:
-                lines.append(f"☐ {task['taskText']}")
+            # Only show 7 tasks
+            if len(lines) < 6 :
+                if task['isChecked'] :
+                    lines.append(f"☑ {task['taskText']}")
+                else:
+                    lines.append(f"☐ {task['taskText']}")
         # adjust text area to start below the heading
         text_rect = pygame.Rect(
             todo_tile_rect[0],
-            heading_rect.bottom + 10,
+            heading_rect.bottom + padding,
             todo_tile_rect[2],
-            todo_tile_rect[3] - (heading_rect.height + 10)
+            todo_tile_rect[3] - (heading_rect.height + padding)
         )
+        logging.info(f"{todo_tile_rect[0]}x{todo_tile_rect[1]}, {todo_tile_rect[2]}x{todo_tile_rect[3]}")
+        logging.info(f"{text_rect[0]}x{text_rect[1]}, {text_rect[2]}x{text_rect[3]}")
         draw_tile(text_rect, (19, 140, 139), lines, font_toDo, align="left")  # transparent background for text
     else:
         text_rect = pygame.Rect(
@@ -255,7 +273,7 @@ def draw_todo_tile():
 
 def load_data():
     """Load data from the JSON file."""
-    global API_URL, LAT, LON, tasks, last_modified_time, API_KEY
+    global API_URL, LAT, LON, tasks, TEMPUOM, last_modified_time, API_KEY
     try:
         # Get the last modified time of the file
         current_modified_time = os.path.getmtime(data_file_path)
@@ -270,15 +288,16 @@ def load_data():
             LAT = data.get('latitude', 0)
             LON = data.get('longitude', 0)
             tasks = data.get('tasks', [])
+            TEMPUOM = data.get('tempuom', "C")
             API_URL = f"https://api.openweathermap.org/data/2.5/weather?lat={LAT}&lon={LON}&APPID={API_KEY}"
             return True  # return true if data is updated
         else:
             return False
     except FileNotFoundError:
-        logging.warning(f"{data_file_path} not found.  Starting with default configuration.")
+        logging.warning(f"{data_file_path} not found. Starting with default configuration.")
         return False
     except json.JSONDecodeError:
-        logging.error(f"Error decoding JSON from {data_file_path}.  Using default configuration.")
+        logging.error(f"Error decoding JSON from {data_file_path}. Using default configuration.")
         return False
     except Exception as e:
         logging.error(f"Error loading data: {e}")
@@ -291,13 +310,14 @@ def reload_config_and_data():
 
     if load_data():  # load data and check if updated
         if API_KEY:
-            weather_data = fetch_weather()  # fetch weather
-            last_weather_update = time.time()
+            weather_data = fetch_weather()
+            last_weather_update = time.time()  # fetch weather
         else:
             weather_data = None
         draw_weather_tile()
         draw_todo_tile()
-        pygame.display.flip()  # update display
+        
+        push_to_fb()
         data_loaded = True
 
 
@@ -309,7 +329,7 @@ if API_KEY:  # changed
     last_weather_update = time.time()
     data_loaded = True
 else:
-    logging.info("API key not found on initial load.  Waiting for update.")
+    logging.info("API key not found on initial load. Waiting for update.")
 
 # Flask endpoint to serve the main dashboard page
 @app.route('/')
@@ -330,10 +350,10 @@ def get_config():
         with open(data_file_path, 'r') as f:
             config_data = json.load(f)
     except FileNotFoundError:
-        logging.warning(f"{data_file_path} not found.  Returning empty config.")
+        logging.warning(f"{data_file_path} not found. Returning empty config.")
         resetConfig()
     except json.JSONDecodeError:
-        logging.error(f"Error decoding JSON from {data_file_path}.  Returning empty config.")
+        logging.error(f"Error decoding JSON from {data_file_path}. Returning empty config.")
         resetConfig()
     except Exception as e:
         logging.error(f"Error in /get_config: {e}")
@@ -345,7 +365,7 @@ def get_config():
 @app.route('/update_config', methods=['POST'])
 def update_config():
     """Handles the POST request to update configuration data."""
-    global API_URL, LAT, LON, tasks, last_modified_time, API_KEY, config_data, update_weather
+    global API_URL, LAT, LON, TEMPUOM, tasks, last_modified_time, API_KEY, config_data, update_weather
     
     update_weather = True
     update_ToDo = True
@@ -377,15 +397,16 @@ def update_config():
         config_data['apiKey'] = data.get('apiKey', config_data.get('apiKey', ""))  # Use existing or default
         config_data['latitude'] = data.get('latitude', config_data.get('latitude', 0))
         config_data['longitude'] = data.get('longitude', config_data.get('longitude', 0))
+        config_data['tempuom'] = data.get('tempuom', config_data.get('tempuom', 'C'));
         config_data['tasks'] = data.get('tasks', config_data.get('tasks', []))
 
         # update the global variables
         API_KEY = config_data['apiKey']
         LAT = config_data['latitude']
         LON = config_data['longitude']
+        TEMPUOM = config_data['tempuom'];
         tasks = config_data['tasks']
         API_URL = f"https://api.openweathermap.org/data/2.5/weather?lat={LAT}&lon={LON}&APPID={API_KEY}"
-
 
         # Write the updated config data back to config.json
         with open(data_file_path, 'w') as f:
@@ -423,7 +444,7 @@ while True:
     # draw time tile always
     draw_time_tile()
     draw_quote_bar()
-    
+
     # Draw the weather tile
     if update_weather:
         weather_data = fetch_weather()
@@ -439,5 +460,5 @@ while True:
         last_weather_update = time.time()
         update_weather = True
 
-    pygame.display.flip()
+    push_to_fb()
     clock.tick(1)

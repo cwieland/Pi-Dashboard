@@ -34,7 +34,7 @@
             margin-top: 1rem;
             font-weight: bold;
         }
-        input[type="text"], input[type="password"], textarea {
+        input[type="text"], input[type="password"], select, textarea {
             width: 100%;
             padding: 0.6rem;
             font-size: 1rem;
@@ -159,7 +159,7 @@
         .password-toggle-button {
             position: absolute;
             right: 0; /* Position button to the right edge of container */
-            top: 50%;
+            top: 20%;
             transform: translateY(-50%);
             background: none;
             border: none;
@@ -214,6 +214,11 @@
                 <input type="text" id="latitude" name="latitude"  />
                 <label for="longitude">Longitude:</label>
                 <input type="text" id="longitude" name="longitude"  />
+                <label for="tempuom">Temperature Units</label>
+                <select id="tempuom">
+                    <option value="C">Celsius</option>
+                    <option value="F">Fahrenheit</option>
+                </select>
                 <div class="card-actions">
                     <button type="button" onclick="saveWeatherConfig()">Save Weather</button>
                 </div>
@@ -230,6 +235,7 @@
         const apiKeyInput = document.getElementById('apiKey');
         const latitudeInput = document.getElementById('latitude');
         const longitudeInput = document.getElementById('longitude');
+        const tempuom = document.getElementById('tempuom');
         const statusMessage = document.getElementById('statusMessage');
         const configForm = document.getElementById('configForm');
         const togglePasswordButton = document.getElementById('togglePassword');
@@ -315,7 +321,7 @@
                 apiKeyInput.value = data.apiKey || '';
                 latitudeInput.value = data.latitude || '';
                 longitudeInput.value = data.longitude || '';
-
+                tempuom.value = data.tempuom || 'C';
                 taskList.innerHTML = ''; // Clear existing tasks
                 if (data.tasks && Array.isArray(data.tasks)) {
                     data.tasks.forEach(task => renderTask(task));
@@ -341,6 +347,7 @@
 			apiKey: apiKeyInput.value.trim() || null,
 			latitude: latitudeInput.value.trim() || null,
 			longitude: longitudeInput.value.trim() || null,
+			tempuom: tempuom.value.trim() || "C",
 			tasks: tasks
 		};
 		
