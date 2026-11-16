@@ -10,14 +10,21 @@ import io
 from flask import Flask, request, jsonify, render_template
 from threading import Thread
 import logging
+import fcntl
+import atexit
+import signal
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # config
-LARGE_FONT = 50
+LARGE_FONT = 40
 MEDIUM_FONT = 28
 SMALL_FONT = 20
+
+KDSETMODE = 0x4B3A
+KD_TEXT = 0x00
+KD_GRAPHICS = 0x01
 
 quote_text = "Information Center"
 
@@ -46,6 +53,19 @@ def push_to_fb():
     fb_surface.blit(screen, (0, 0))
     with open("/dev/fb0", "r+b", buffering=0) as fb:
         fb.write(fb_surface.get_buffer())
+
+def set_tty_graphics_mode(enable=True):
+    """Switches /dev/tty1 to graphics mode to hide cursor and suppress keyboard echo."""
+    try:
+        with open("/dev/tty1", "w") as tty:
+            fcntl.ioctl(tty, KDSETMODE, KD_GRAPHICS if enable else KD_TEXT)
+    except Exception as e:
+        logging.warning(f"Could not set TTY mode: {e}")
+
+# Switch tty1 to graphics mode and ensure it restores on exit or systemd stop
+set_tty_graphics_mode(True)
+atexit.register(set_tty_graphics_mode, False)
+signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
 # Font sizes
 font_large = pygame.font.Font('Poppins-Regular.ttf', LARGE_FONT)
@@ -118,7 +138,7 @@ def fetch_weather():
         logging.error(f"Error fetching weather: {e}")
         return None
 
-def draw_tile(rect, color, lines, font, top_padding=10, radius=12, align="center"):
+def draw_tile(rect, color, lines, font, top_padding=6, radius=12, align="center"):
     """Draws a tile with rounded corners and text."""
     pygame.draw.rect(screen, color, rect, border_radius=radius)
     rendered_lines = [font.render(str(text), True, (255, 255, 255)) for text in lines]
@@ -153,9 +173,8 @@ def draw_time_tile():
     """Draws the time tile."""
     global current_time, day_date, seconds
 
-    current_time_new = time.strftime("%I:%M %p")
+    current_time_new = time.strftime("%I:%M:%S %p")
     day_date_new = time.strftime("%A, %d")
-    seconds_new = time.strftime("%S")
 
     if current_time != current_time_new or day_date != day_date_new:
         current_time = current_time_new
@@ -166,14 +185,8 @@ def draw_time_tile():
 
     time_height = font_large.get_height()
     day_date_surface = font_medium.render(day_date, True, (255, 255, 255))
-    day_date_rect = day_date_surface.get_rect(center=(time_tile_rect[0] + time_tile_rect[2] // 2, time_tile_rect[1] + time_height + font_medium.get_height() - 8 - SMALL_FONT))
+    day_date_rect = day_date_surface.get_rect(center=(time_tile_rect[0] + time_tile_rect[2] // 2, time_tile_rect[1] + time_height + font_medium.get_height() - 4 - SMALL_FONT))
     screen.blit(day_date_surface, day_date_rect)
-
-    if seconds != seconds_new:
-        seconds = seconds_new
-        seconds_surface = font_small.render(seconds, True, (255, 255, 255))
-        seconds_rect = seconds_surface.get_rect(bottomright=(time_tile_rect[0] + time_tile_rect[2] - padding, time_tile_rect[1] + time_tile_rect[3] - padding))
-        screen.blit(seconds_surface, seconds_rect)
 
 # Function to draw the weather tile
 def draw_weather_tile():
@@ -257,8 +270,9 @@ def draw_todo_tile():
             todo_tile_rect[2],
             todo_tile_rect[3] - (heading_rect.height + padding)
         )
-        logging.info(f"{todo_tile_rect[0]}x{todo_tile_rect[1]}, {todo_tile_rect[2]}x{todo_tile_rect[3]}")
-        logging.info(f"{text_rect[0]}x{text_rect[1]}, {text_rect[2]}x{text_rect[3]}")
+        # REMOVE THIS
+        #logging.info(f"{todo_tile_rect[0]}x{todo_tile_rect[1]}, {todo_tile_rect[2]}x{todo_tile_rect[3]}")
+        #logging.info(f"{text_rect[0]}x{text_rect[1]}, {text_rect[2]}x{text_rect[3]}")
         draw_tile(text_rect, (19, 140, 139), lines, font_toDo, align="left")  # transparent background for text
     else:
         text_rect = pygame.Rect(
